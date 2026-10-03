@@ -1,0 +1,16 @@
+{
+  "rewrites": [
+    {
+      "source": "/img/:path*",
+      "destination": "https://ik.imagekit.io/coohd0rjhx/:path*"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/img/:path*",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, s-maxage=31536000, immutable" }
+      ]
+    }
+  ]
+}

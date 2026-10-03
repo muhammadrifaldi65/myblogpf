@@ -32,6 +32,9 @@ const shortDate = (value) =>
 function thumb(url, width = 900) {
   if (!url) return '';
   if (!url.includes('imagekit.io')) return url;
+  /* Lewat domain sendiri (/img/...) supaya tidak kena DNS ISP yang salah arah.
+     vercel.json meneruskan /img/* ke ImageKit. */
+  url = url.replace(/^https?:\/\/ik\.imagekit\.io\/[^/]+\//, '/img/');
   return url + (url.includes('?') ? '&' : '?') + `tr=w-${width},q-80,f-auto`;
 }
 
