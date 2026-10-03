@@ -48,7 +48,13 @@ function readingTime(markdown = '') {
 
 function publicPost(post) {
   const { content, ...rest } = post;
-  return { ...rest, readingTime: readingTime(content) };
+  return { ...rest, readingTime: post.readingTime || readingTime(content) };
+}
+
+// Browser selalu meminta ulang agar perubahan dari admin langsung tampak.
+// CDN tetap boleh menyajikan respons publik yang masih baru selama satu menit.
+function setPublicCache(res) {
+  res.set('Cache-Control', 'public, max-age=0, s-maxage=60, stale-while-revalidate=300');
 }
 
 function verifyToken(token) {
@@ -119,6 +125,7 @@ app.get('/api/auth/me', requireAdmin, (req, res) => {
 
 app.get('/api/site', async (req, res, next) => {
   try {
+    setPublicCache(res);
     res.json(await db.getSite());
   } catch (err) {
     next(err);
@@ -142,8 +149,10 @@ app.put('/api/site', requireAdmin, async (req, res, next) => {
 
 app.get('/api/posts', async (req, res, next) => {
   try {
-    const all = await db.getAllPosts();
     const isAdmin = Boolean(verifyToken(req.cookies.session));
+    // Pencarian server perlu isi artikel; halaman normal dan admin cukup
+    // menerima metadata kecil dari getPostSummaries().
+    const all = req.query.q ? await db.getAllPosts() : await db.getPostSummaries();
 
     let list = isAdmin && req.query.all === '1' ? all : all.filter((p) => p.status === 'published');
 
@@ -159,6 +168,7 @@ app.get('/api/posts', async (req, res, next) => {
     }
 
     const limit = Number(req.query.limit) || 0;
+    if (req.query.all !== '1') setPublicCache(res);
     res.json((limit ? list.slice(0, limit) : list).map(publicPost));
   } catch (err) {
     next(err);
@@ -173,15 +183,12 @@ app.get('/api/posts/:slug', async (req, res, next) => {
     const isAdmin = Boolean(verifyToken(req.cookies.session));
     if (post.status !== 'published' && !isAdmin) return res.status(404).json({ error: 'Tulisan tidak ditemukan.' });
 
-    const all = await db.getAllPosts();
-    const index = all.filter((p) => p.status === 'published').sort((a, b) => new Date(b.date) - new Date(a.date));
-    const pos = index.findIndex((p) => p.slug === post.slug);
+    const navigation = await db.getPostNavigation(post.slug);
 
     res.json({
       ...post,
       readingTime: readingTime(post.content),
-      prev: pos > 0 ? { slug: index[pos - 1].slug, title: index[pos - 1].title } : null,
-      next: pos > -1 && pos < index.length - 1 ? { slug: index[pos + 1].slug, title: index[pos + 1].title } : null
+      ...navigation
     });
   } catch (err) {
     next(err);
@@ -205,7 +212,8 @@ app.post('/api/posts', requireAdmin, async (req, res, next) => {
       cover: body.cover || '',
       tags: Array.isArray(body.tags) ? body.tags : [],
       status: body.status === 'published' ? 'published' : 'draft',
-      date: body.date || new Date().toISOString()
+      date: body.date || new Date().toISOString(),
+      readingTime: readingTime(body.content || '')
     });
 
     res.status(201).json(post);
@@ -235,7 +243,8 @@ app.put('/api/posts/:id', requireAdmin, async (req, res, next) => {
       cover: body.cover ?? current.cover,
       tags: Array.isArray(body.tags) ? body.tags : current.tags,
       status: body.status === 'published' ? 'published' : 'draft',
-      date: body.date || current.date
+      date: body.date || current.date,
+      readingTime: readingTime(body.content ?? current.content)
     });
 
     res.json(updated);
@@ -299,7 +308,12 @@ app.delete('/api/imagekit/files/:fileId', requireAdmin, async (req, res) => {
    Halaman
 ---------------------------------------------------------------- */
 
-app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
+app.use(express.static(path.join(__dirname, 'public'), {
+  extensions: ['html'],
+  // Nama aset belum memakai hash, jadi cache dibuat cukup panjang untuk
+  // kunjungan berulang tanpa membuat rilis baru terlalu lama tertahan.
+  maxAge: IS_PROD ? '1d' : 0
+}));
 
 app.get('/blog/:slug', (req, res) => res.sendFile(path.join(__dirname, 'public', 'post.html')));
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));

@@ -73,9 +73,22 @@ function ensureSchema() {
           tags         JSONB NOT NULL DEFAULT '[]',
           status       TEXT NOT NULL DEFAULT 'draft',
           date         TIMESTAMPTZ NOT NULL DEFAULT now(),
-          updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+          updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+          reading_time INT NOT NULL DEFAULT 0
         );
       `);
+      // Kolom ini membuat halaman daftar tulisan tidak perlu mengunduh
+      // seluruh Markdown hanya untuk menghitung estimasi waktu baca.
+      await query(`ALTER TABLE posts ADD COLUMN IF NOT EXISTS reading_time INT NOT NULL DEFAULT 0;`);
+      await query(`
+        UPDATE posts
+        SET reading_time = GREATEST(
+          1,
+          CEIL(COALESCE(array_length(regexp_split_to_array(BTRIM(content), E'\\s+'), 1), 0) / 200.0)::INT
+        )
+        WHERE reading_time = 0;
+      `);
+      await query(`ALTER TABLE posts ALTER COLUMN reading_time SET DEFAULT 1;`);
       await query(`CREATE INDEX IF NOT EXISTS posts_status_date_idx ON posts (status, date DESC);`);
 
       // Profil disimpan sebagai satu baris JSON tunggal — cukup untuk
@@ -99,18 +112,20 @@ function ensureSchema() {
 /* ---------------- pemetaan baris <-> objek yang dipakai server.js ---------------- */
 
 function rowToPost(row) {
-  return {
+  const post = {
     id: row.id,
     slug: row.slug,
     title: row.title,
     excerpt: row.excerpt,
-    content: row.content,
     cover: row.cover,
     tags: row.tags,
     status: row.status,
     date: row.date.toISOString(),
-    updatedAt: row.updated_at.toISOString()
+    updatedAt: row.updated_at.toISOString(),
+    readingTime: row.reading_time || 1
   };
+  if (typeof row.content === 'string') post.content = row.content;
+  return post;
 }
 
 async function getAllPosts() {
@@ -119,10 +134,48 @@ async function getAllPosts() {
   return rows.map(rowToPost);
 }
 
+// Dipakai halaman daftar dan panel admin. Isi artikel sengaja tidak diambil:
+// kontennya baru diminta saat sebuah artikel dibuka atau diedit.
+async function getPostSummaries() {
+  await ensureSchema();
+  const { rows } = await query(`
+    SELECT id, slug, title, excerpt, cover, tags, status, date, updated_at, reading_time
+    FROM posts
+    ORDER BY date DESC
+  `);
+  return rows.map(rowToPost);
+}
+
 async function getPostBySlug(slug) {
   await ensureSchema();
   const { rows } = await query('SELECT * FROM posts WHERE slug = $1', [slug]);
   return rows[0] ? rowToPost(rows[0]) : null;
+}
+
+async function getPostNavigation(slug) {
+  await ensureSchema();
+  const { rows } = await query(
+    `WITH ordered AS (
+       SELECT
+         slug,
+         LAG(slug) OVER (ORDER BY date DESC, id ASC) AS prev_slug,
+         LAG(title) OVER (ORDER BY date DESC, id ASC) AS prev_title,
+         LEAD(slug) OVER (ORDER BY date DESC, id ASC) AS next_slug,
+         LEAD(title) OVER (ORDER BY date DESC, id ASC) AS next_title
+       FROM posts
+       WHERE status = 'published'
+     )
+     SELECT prev_slug, prev_title, next_slug, next_title
+     FROM ordered
+     WHERE slug = $1`,
+    [slug]
+  );
+  const row = rows[0];
+  if (!row) return { prev: null, next: null };
+  return {
+    prev: row.prev_slug ? { slug: row.prev_slug, title: row.prev_title } : null,
+    next: row.next_slug ? { slug: row.next_slug, title: row.next_title } : null
+  };
 }
 
 async function slugExists(slug, excludeId) {
@@ -136,10 +189,10 @@ async function slugExists(slug, excludeId) {
 async function insertPost(post) {
   await ensureSchema();
   const { rows } = await query(
-    `INSERT INTO posts (id, slug, title, excerpt, content, cover, tags, status, date, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9)
+    `INSERT INTO posts (id, slug, title, excerpt, content, cover, tags, status, date, updated_at, reading_time)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10)
      RETURNING *`,
-    [post.id, post.slug, post.title, post.excerpt, post.content, post.cover, JSON.stringify(post.tags), post.status, post.date]
+    [post.id, post.slug, post.title, post.excerpt, post.content, post.cover, JSON.stringify(post.tags), post.status, post.date, post.readingTime]
   );
   return rowToPost(rows[0]);
 }
@@ -149,10 +202,10 @@ async function updatePost(id, patch) {
   const { rows } = await query(
     `UPDATE posts SET
        slug = $2, title = $3, excerpt = $4, content = $5, cover = $6,
-       tags = $7, status = $8, date = $9, updated_at = now()
+       tags = $7, status = $8, date = $9, updated_at = now(), reading_time = $10
      WHERE id = $1
      RETURNING *`,
-    [id, patch.slug, patch.title, patch.excerpt, patch.content, patch.cover, JSON.stringify(patch.tags), patch.status, patch.date]
+    [id, patch.slug, patch.title, patch.excerpt, patch.content, patch.cover, JSON.stringify(patch.tags), patch.status, patch.date, patch.readingTime]
   );
   return rows[0] ? rowToPost(rows[0]) : null;
 }
@@ -180,7 +233,9 @@ module.exports = {
   ensureSchema,
   DEFAULT_SITE,
   getAllPosts,
+  getPostSummaries,
   getPostBySlug,
+  getPostNavigation,
   slugExists,
   insertPost,
   updatePost,

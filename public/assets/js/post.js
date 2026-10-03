@@ -140,6 +140,7 @@
       if (src) {
         img.src = thumb(src, 1400);
       }
+      img.decoding = 'async';
     });
 
   } catch (err) {

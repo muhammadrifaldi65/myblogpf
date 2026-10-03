@@ -1,4 +1,8 @@
 (async function () {
+  // Mulai dua request bersamaan; sebelumnya daftar tulisan baru diminta
+  // setelah profil selesai dimuat.
+  const latestPostsRequest = api.get('/api/posts?limit=3');
+
   try {
     const site = await api.get('/api/site');
     paintSite(site);
@@ -18,8 +22,12 @@
     if (site.avatar) {
       const fig = document.querySelector('[data-portrait]');
       const img = document.querySelector('[data-site-avatar]');
-      img.src = thumb(site.avatar, 1600);
+      // Bingkai potret maksimal sekitar 256px; 600px tetap tajam di layar
+      // retina tanpa mengunduh file 1600px yang tidak pernah terlihat.
+      img.src = thumb(site.avatar, 600);
       img.alt = `Potret ${site.name || ''}`;
+      img.decoding = 'async';
+      img.fetchPriority = 'high';
       fig.hidden = false;
     }
 
@@ -55,7 +63,7 @@
         ? site.projects
             .map((p) => {
               const inner = `
-                ${p.image ? `<div class="work__media"><img src="${esc(thumb(p.image, 800))}" alt="${esc(p.title)}" loading="lazy"></div>` : ''}
+                ${p.image ? `<div class="work__media"><img src="${esc(thumb(p.image, 800))}" alt="${esc(p.title)}" loading="lazy" decoding="async"></div>` : ''}
                 <div class="work__body">
                   <span class="work__year">${esc(p.year || '')}</span>
                   <h3 class="work__title">${esc(p.title || '')}</h3>
@@ -84,14 +92,14 @@
   // Tiga tulisan terbaru
   const box = document.querySelector('[data-latest-posts]');
   try {
-    const posts = await api.get('/api/posts?limit=3');
+    const posts = await latestPostsRequest;
     box.innerHTML = posts.length
       ? posts
           .map(
             (p) => `<article class="entry">
               <time class="entry__date" datetime="${esc(p.date)}">${shortDate(p.date)}</time>
               <div class="entry__body">
-                ${p.cover ? `<a class="entry__thumb" href="/blog/${esc(p.slug)}" tabindex="-1" aria-hidden="true"><img src="${esc(thumb(p.cover, 400))}" alt="" loading="lazy"></a>` : ''}
+                ${p.cover ? `<a class="entry__thumb" href="/blog/${esc(p.slug)}" tabindex="-1" aria-hidden="true"><img src="${esc(thumb(p.cover, 400))}" alt="" loading="lazy" decoding="async"></a>` : ''}
                 <div>
                   <h3 class="entry__title"><a href="/blog/${esc(p.slug)}">${esc(p.title)}</a></h3>
                   ${p.excerpt ? `<p class="entry__excerpt">${esc(p.excerpt)}</p>` : ''}

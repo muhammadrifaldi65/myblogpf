@@ -2,6 +2,7 @@
   const list = document.querySelector('[data-posts]');
   const tagbar = document.querySelector('[data-tags]');
   const search = document.getElementById('q');
+  const postsRequest = api.get('/api/posts');
 
   let posts = [];
   let activeTag = new URLSearchParams(location.search).get('tag') || '';
@@ -39,7 +40,7 @@
             (p) => `<article class="entry">
               <time class="entry__date" datetime="${esc(p.date)}">${shortDate(p.date)}</time>
               <div class="entry__body">
-                ${p.cover ? `<a class="entry__thumb" href="/blog/${esc(p.slug)}" tabindex="-1" aria-hidden="true"><img src="${esc(thumb(p.cover, 400))}" alt="" loading="lazy"></a>` : ''}
+                ${p.cover ? `<a class="entry__thumb" href="/blog/${esc(p.slug)}" tabindex="-1" aria-hidden="true"><img src="${esc(thumb(p.cover, 400))}" alt="" loading="lazy" decoding="async"></a>` : ''}
                 <div>
                   <h2 class="entry__title"><a href="/blog/${esc(p.slug)}">${esc(p.title)}</a></h2>
                   ${p.excerpt ? `<p class="entry__excerpt">${esc(p.excerpt)}</p>` : ''}
@@ -86,7 +87,7 @@
   });
 
   try {
-    posts = await api.get('/api/posts');
+    posts = await postsRequest;
     renderTags();
     render();
   } catch {
