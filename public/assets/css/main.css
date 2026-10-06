@@ -215,7 +215,12 @@ button {
    ========================================================= */
 
 .hero {
+  /* Isi layar pertama sepenuhnya. About baru muncul setelah pengguna
+     menggulir, sementara gambar latar tetap mengisi area hero sampai bawah. */
+  min-height: calc(100svh - 4rem);
   padding-block: clamp(3.5rem, 9vw, 7.5rem) clamp(3rem, 7vw, 6rem);
+  display: grid;
+  align-items: center;
   position: relative;
   isolation: isolate;
   overflow: hidden;
